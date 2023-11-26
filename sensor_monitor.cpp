@@ -7,6 +7,8 @@
 #include "json.hpp" // json handling
 #include "mqtt/client.h" // paho mqtt
 #include <iomanip>
+#include <comdef.h>
+#include <Wbemidl.h>
 
 #define QOS 1
 #define BROKER_ADDRESS "tcp://localhost:1883"
@@ -44,6 +46,9 @@ int main(int argc, char* argv[]) {
 
         // Generate a random value.
         int value = rand();
+
+        //Get sensors ID: CPU usage, RAM usage and CPU temp
+
 
         // Construct the JSON message.
         nlohmann::json j;
