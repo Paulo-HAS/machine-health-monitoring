@@ -167,7 +167,7 @@ void monitor_thread(int f){
     sensor_info["sensor_id"] = RAM_USAGE_ID;
     sensor_info["data_type"] = "float";
     sensor_info["data_interval"] = SENSOR_I;
-    j["sensors"].push_back(sensor_info);
+    j["sensors"].push_back(sensor_info);  
 
     // Publish the JSON message to the appropriate topic.
     std::string topic = "/sensors";
