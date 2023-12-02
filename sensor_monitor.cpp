@@ -7,11 +7,22 @@
 #include "json.hpp" // json handling
 #include "mqtt/client.h" // paho mqtt
 #include <iomanip>
-#include <comdef.h>
-#include <Wbemidl.h>
+#include <string.h>
+//#include <comdef.h>
+//#include <Wbemidl.h>
 
 #define QOS 1
 #define BROKER_ADDRESS "tcp://localhost:1883"
+
+std::string getMachineId(){
+    // Get the unique machine identifier, in this case, the hostname.
+    char hostname[1024];
+    gethostname(hostname, 1024);
+    std::string machineId(hostname);
+    printf("MachineId: %s", machineId);
+    return std::string(hostname);
+}
+
 
 int main(int argc, char* argv[]) {
     std::string clientId = "sensor-monitor";
@@ -30,10 +41,7 @@ int main(int argc, char* argv[]) {
     }
     std::clog << "connected to the broker" << std::endl;
 
-    // Get the unique machine identifier, in this case, the hostname.
-    char hostname[1024];
-    gethostname(hostname, 1024);
-    std::string machineId(hostname);
+    std::string machineId = getMachineId();
 
     while (true) {
        // Get the current time in ISO 8601 format.
