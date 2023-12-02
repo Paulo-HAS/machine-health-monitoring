@@ -9,8 +9,10 @@
 #include <iomanip>
 #include <string.h>
 #include <fstream>
+#include <sys/sysinfo.h>
 #include <sstream>
 #include <thread>
+#include <mutex>
 //#include <comdef.h>
 //#include <Wbemidl.h>
 
@@ -18,13 +20,13 @@ using namespace std;
 
 #define SENSOR_I 1000;     //sensor topic update interval
 #define MONITOR_I 30000;   //monitor topic update interval
-#define CPU_TEMP_ID "cpu_temp";
+#define CPU_USAGE_ID "cpu_usage";
 #define RAM_USAGE_ID "ram_usage";
 
 #define QOS 1
 #define BROKER_ADDRESS "tcp://localhost:1883"
 
-std::string machineId = getMachineId();
+std::mutex m;
 
 std::string monitor_clientId = "sensor-monitor";
 mqtt::client m_client(BROKER_ADDRESS, monitor_clientId);
@@ -36,6 +38,8 @@ string getMachineId(){
     std::string machineId(hostname);
     return std::string(hostname);
 }
+std::string machineId = getMachineId();
+
 
 float stringToFloat(const std::string &str){        //String to float converter function
     float val;
@@ -45,22 +49,34 @@ float stringToFloat(const std::string &str){        //String to float converter 
 
 }
 
+void publish_msg(mqtt::message msg){
+    m.lock();
+    m_client.publish(msg);
+    m.unlock();
+}
 
-float getCpuTemperature(){
+float getCpuUsage(){
     //CPU temperature info
 
-    std::ifstream file("/sys/class/thermal/thermal_zone0/temp");
-    float temp;
-    if (!file.is_open()) {
-        std::cerr << "Error opening file '/sys/class/thermal/thermal_zone0/temp' " << std::endl;
+    std::ifstream proc_stat("/proc/stat");
+    if(!proc_stat.is_open()){
+        std::cerr << "Error opening /proc/stat" << std::endl;
         return -1.0; // Return a negative value to indicate an error
     }
-
-    file >> temp;
-    temp = temp / 1000.0;    // Converting from millidegrees to degrees.
-    file.close();
-    
-    return temp;
+    proc_stat.ignore(5, ' '); 
+    std::vector<size_t> times;
+    for (size_t time; proc_stat >> time; times.push_back(time));
+    const std::vector<size_t> cpu_times = times;
+    if (cpu_times.size() < 4)
+        return false;
+    double idle_time = cpu_times[3];
+    double total_time = std::accumulate(cpu_times.begin(), cpu_times.end(), 0);
+    //clog << idle_time << endl;
+    //clog << total_time << endl;
+    float aux = 1.0-(idle_time/total_time);
+    aux *= 100.0;
+    //clog << aux << endl;
+    return aux;
 }
 
 float getRamUsage(){
@@ -97,17 +113,21 @@ string getTimestamp(){
     return timestamp;
 }
 
-void cpuTemp_thread(int f){
+void cpuUsage_thread(int f){
     while(true){
         nlohmann::json j;
+        float cpu_u = getCpuUsage();
+        clog << "cpu Usage: " << cpu_u << endl;
+        if(cpu_u == -1.0)
+            return;
         j["timestamp"] = getTimestamp();
-        j["value"] = getCpuTemperature();
+        j["value"] = cpu_u;
 
         // Publish the JSON message to the appropriate topic.
-        std::string topic = "/sensors/" + machineId + "/cpu_temp";
+        std::string topic = "/sensors/" + machineId + "/cpu_usage";
         mqtt::message msg(topic, j.dump(), QOS, false);
         std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
-        m_client.publish(msg);
+        publish_msg(msg);
 
         // Update frequency
         std::this_thread::sleep_for(std::chrono::seconds(f));
@@ -117,6 +137,9 @@ void cpuTemp_thread(int f){
 void ramUsage_thread(int f){
     while(true){
         nlohmann::json j;
+        float ram_u = getRamUsage();
+        if(ram_u == -1.0)
+            return;
         j["timestamp"] = getTimestamp();
         j["value"] = getRamUsage();
 
@@ -124,7 +147,7 @@ void ramUsage_thread(int f){
         std::string topic = "/sensors/" + machineId + "/ram_usage";
         mqtt::message msg(topic, j.dump(), QOS, false);
         std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
-        m_client.publish(msg);
+        publish_msg(msg);
 
         // Update frequency
         std::this_thread::sleep_for(std::chrono::seconds(f));
@@ -133,27 +156,27 @@ void ramUsage_thread(int f){
 
 void monitor_thread(int f){
     nlohmann::json j;
-        j["machine_id"] = machineId;
-        
-        nlohmann::json sensor_info;
-        sensor_info["sensor_id"] = CPU_TEMP_ID;
-        sensor_info["data_type"] = "float";
-        sensor_info["data_interval"] = SENSOR_I;
-        j["sensors"].push_back(sensor_info);
-        
-        sensor_info["sensor_id"] = RAM_USAGE_ID;
-        sensor_info["data_type"] = "float";
-        sensor_info["data_interval"] = SENSOR_I;
-        j["sensors"].push_back(sensor_info);
+    j["machine_id"] = machineId;
+    
+    nlohmann::json sensor_info;
+    sensor_info["sensor_id"] = CPU_USAGE_ID;
+    sensor_info["data_type"] = "float";
+    sensor_info["data_interval"] = SENSOR_I;
+    j["sensors"].push_back(sensor_info);
+    
+    sensor_info["sensor_id"] = RAM_USAGE_ID;
+    sensor_info["data_type"] = "float";
+    sensor_info["data_interval"] = SENSOR_I;
+    j["sensors"].push_back(sensor_info);
 
-        // Publish the JSON message to the appropriate topic.
-        std::string topic = "/sensors";
-        mqtt::message msg(topic, j.dump(), QOS, false);
-        std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
-        m_client.publish(msg);
+    // Publish the JSON message to the appropriate topic.
+    std::string topic = "/sensors";
+    mqtt::message msg(topic, j.dump(), QOS, false);
+    std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
+    publish_msg(msg);
 
-        // Update frequency
-        std::this_thread::sleep_for(std::chrono::seconds(f));
+    // Update frequency
+    std::this_thread::sleep_for(std::chrono::seconds(f));
 }
 
 int main(int argc, char* argv[]) {
@@ -173,22 +196,16 @@ int main(int argc, char* argv[]) {
 
     clog << "MachineID: " << machineId << endl;
 
-    while (true) {
-       // Get the current time in ISO 8601 format.
-        auto now = std::chrono::system_clock::now();
-        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-        std::tm* now_tm = std::localtime(&now_c);
-        std::stringstream ss;
-        ss << std::put_time(now_tm, "%FT%TZ");
-        std::string timestamp = ss.str();
-        int mf = MONITOR_I;
-        int sf = SENSOR_I;
+    int mf = MONITOR_I;
+    int sf = SENSOR_I;
 
-        std::thread (monitor_thread, mf).detach();
-        std::thread (cpuTemp_thread, sf).detach();
-        std::thread (ramUsage_thread, sf).detach();
+    //monitor_thread(mf);
+    //cpuUsage_thread(sf);
+    //ramUsage_thread(sf);
 
-    }
+    std::thread (monitor_thread, mf).detach();
+    std::thread (cpuUsage_thread, sf).detach();
+    std::thread (ramUsage_thread, sf).detach();
 
     return EXIT_SUCCESS;
 }
