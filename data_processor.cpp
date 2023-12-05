@@ -5,13 +5,29 @@
 #include <unistd.h>
 #include "json.hpp" 
 #include "mqtt/client.h" 
+#include <boost/asio.hpp>
 
 #define QOS 1
 #define BROKER_ADDRESS "tcp://localhost:1883"
-#define GRAPHITE_HOST "graphite"
+#define GRAPHITE_HOST "10.0.0.1"
 #define GRAPHITE_PORT 2003
 
+using namespace std;
+using boost::asio::ip::tcp;
+
 void post_metric(const std::string& machine_id, const std::string& sensor_id, const std::string& timestamp_str, const int value) {
+    boost::asio::io_service io_service;
+    tcp::resolver resolver(io_service);
+    tcp::resolver::query query(GRAPHITE_HOST, std::to_string(GRAPHITE_PORT));
+    tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+    
+    boost::asio::io_service io_service;
+    boost::asio::ip::tcp::socket socket(io_service);
+    boost::asio::connect(socket, endpoint_iterator);
+
+
+    std::string metric_path = machine_id + "." + sensor_id;
+    std::string msg = metric_path + " " + to_string(value) + " " + timestamp_str + "\n";
 
 }
 

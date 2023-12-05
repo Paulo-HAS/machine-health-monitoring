@@ -18,8 +18,8 @@
 
 using namespace std;
 
-#define SENSOR_I 1000;     //sensor topic update interval
-#define MONITOR_I 30000;   //monitor topic update interval
+#define SENSOR_I 1;     //sensor topic update interval
+#define MONITOR_I 30;   //monitor topic update interval
 #define CPU_USAGE_ID "cpu_usage";
 #define RAM_USAGE_ID "ram_usage";
 
@@ -50,9 +50,7 @@ float stringToFloat(const std::string &str){        //String to float converter 
 }
 
 void publish_msg(mqtt::message msg){
-    m.lock();
     m_client.publish(msg);
-    m.unlock();
 }
 
 float getCpuUsage(){
@@ -113,48 +111,42 @@ string getTimestamp(){
     return timestamp;
 }
 
-void cpuUsage_thread(int f){
-    while(true){
-        nlohmann::json j;
-        float cpu_u = getCpuUsage();
-        clog << "cpu Usage: " << cpu_u << endl;
-        if(cpu_u == -1.0)
-            return;
-        j["timestamp"] = getTimestamp();
-        j["value"] = cpu_u;
+void cpuUsage_run(){
+    
+    nlohmann::json j;
+    float cpu_u = getCpuUsage();
+    if(cpu_u == -1.0)
+        return;
+    j["timestamp"] = getTimestamp();
+    j["value"] = cpu_u;
 
-        // Publish the JSON message to the appropriate topic.
-        std::string topic = "/sensors/" + machineId + "/cpu_usage";
-        mqtt::message msg(topic, j.dump(), QOS, false);
-        std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
-        publish_msg(msg);
+    // Publish the JSON message to the appropriate topic.
+    std::string topic = "/sensors/" + machineId + "/cpu_usage";
+    mqtt::message msg(topic, j.dump(), QOS, false);
+    publish_msg(msg);
+    std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
 
-        // Update frequency
-        std::this_thread::sleep_for(std::chrono::seconds(f));
-    }
+    
 }
 
-void ramUsage_thread(int f){
-    while(true){
-        nlohmann::json j;
-        float ram_u = getRamUsage();
-        if(ram_u == -1.0)
-            return;
-        j["timestamp"] = getTimestamp();
-        j["value"] = getRamUsage();
+void ramUsage_run(){
+    
+    nlohmann::json j;
+    float ram_u = getRamUsage();
+    if(ram_u == -1.0)
+        return;
+    j["timestamp"] = getTimestamp();
+    j["value"] = getRamUsage();
 
-        // Publish the JSON message to the appropriate topic.
-        std::string topic = "/sensors/" + machineId + "/ram_usage";
-        mqtt::message msg(topic, j.dump(), QOS, false);
-        std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
-        publish_msg(msg);
-
-        // Update frequency
-        std::this_thread::sleep_for(std::chrono::seconds(f));
-    }
+    // Publish the JSON message to the appropriate topic.
+    std::string topic = "/sensors/" + machineId + "/ram_usage";
+    mqtt::message msg(topic, j.dump(), QOS, false);
+    publish_msg(msg);
+    std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
+        
 }
 
-void monitor_thread(int f){
+void monitor_run(){
     nlohmann::json j;
     j["machine_id"] = machineId;
     
@@ -172,11 +164,9 @@ void monitor_thread(int f){
     // Publish the JSON message to the appropriate topic.
     std::string topic = "/sensors";
     mqtt::message msg(topic, j.dump(), QOS, false);
-    std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
     publish_msg(msg);
-
-    // Update frequency
-    std::this_thread::sleep_for(std::chrono::seconds(f));
+    std::clog << "message published - topic: " << topic << " - message: " << j.dump() << std::endl;
+    
 }
 
 int main(int argc, char* argv[]) {
@@ -199,13 +189,18 @@ int main(int argc, char* argv[]) {
     int mf = MONITOR_I;
     int sf = SENSOR_I;
 
-    //monitor_thread(mf);
-    //cpuUsage_thread(sf);
-    //ramUsage_thread(sf);
+    monitor_run();
 
-    std::thread (monitor_thread, mf).detach();
-    std::thread (cpuUsage_thread, sf).detach();
-    std::thread (ramUsage_thread, sf).detach();
+    while(true){
+        cpuUsage_run();
+        ramUsage_run();
+        std::this_thread::sleep_for(std::chrono::seconds(sf));
+    }
+    
+
+    //std::thread (monitor_thread, mf).detach();
+    //std::thread (cpuUsage_thread, sf).detach();
+    //std::thread (ramUsage_thread, sf).detach();
 
     return EXIT_SUCCESS;
 }
